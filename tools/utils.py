@@ -23,7 +23,12 @@ to_cpu = lambda tensor: tensor.detach().cpu().numpy()
 
 def parse_npz(npz, allow_pickle=True):
     npz = np.load(npz, allow_pickle=allow_pickle)
+    print(f"npz.files:{npz.files}")
+    for k in npz.files:
+        print(f"npz[{k}]:{npz[k].shape}")
     npz = {k: npz[k].item() for k in npz.files}
+    # npz = {k: npz[k].item() if npz[k].size == 1 else npz[k] for k in npz.files}
+
     return DotDict(npz)
 
 def params2torch(params, dtype = torch.float32):

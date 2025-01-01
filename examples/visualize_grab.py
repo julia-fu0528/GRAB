@@ -37,6 +37,9 @@ def visualize_sequences(cfg):
     grab_path = cfg.grab_path
 
     all_seqs = glob.glob(grab_path + '/*/*eat*.npz')
+    # all_seqs = [seq for seq in all_seqs if 'verts_body' not in os.path.basename(os.path.dirname(seq))
+    #                                     and 'verts_object' not in os.path.basename(os.path.dirname(seq))]
+
 
     mv = MeshViewer(offscreen=False)
 
