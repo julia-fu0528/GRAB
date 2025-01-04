@@ -2,7 +2,15 @@ import numpy as np
 from manopth.manolayer import ManoLayer
 import trimesh
 import torch
+import os
 import sys
+from collections.abc import Mapping
+
+easymocap_path = os.path.abspath("../../third-party/EasyMocap")
+sys.path.append(easymocap_path)
+from easymocap.dataset import CONFIG
+from easymocap.bodymodel.smplx import MANO
+
 
 def get_keypoints_from_mano_params(pose, orient, trans, hand_type='left'):
     # Initialize MANO layer
@@ -140,11 +148,20 @@ def fit_mano_to_params(pose_params, orient_params, trans_params, shape_params=No
     
     return hand_verts, hand_joints
 
+class Config(dict):
+    """A dictionary that supports both dict-style and attribute-style access"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__dict__ = self  # Allow attribute-style access
+
 
 # Example usage:
 if __name__ == "__main__":
 
     mesh_file = "../../processed_data/tools/subject_meshes/male/s1_lhand.ply"
+    beta_file = "../../processed_data/tools/subject_meshes/male/s1_lhand_betas.npy"
+    # Load the beta file
+    betas = np.load(beta_file)
     lhand_mesh = trimesh.load(mesh_file)
 
     original_lhand_vertices = lhand_mesh.vertices
@@ -160,44 +177,81 @@ if __name__ == "__main__":
     lhand_transl = lhand_params['transl'] 
     lhand_fullpose = lhand_params['fullpose'] # 45
     lhand_vtemp = data['lhand'].item().get('vtemp')
+    
+
+    mano_model_path = "../../mano/MANO_LEFT.pkl"
+    cfg_hand = Config({
+        'use_pca': False,
+        'use_flat_mean': True,
+        'num_pca_comps': 6
+    })
+
+    mano = MANO(model_path=mano_model_path, cfg_hand=cfg_hand, is_rhand=False)
 
 
-    mano_layer = ManoLayer(
-        mano_root="../../mano",  # Path to MANO model files
-        use_pca=False,  # Disable PCA, use full pose parameters
-        flat_hand_mean=True  # Start with the flat hand as the canonical pose
-    )   
+    # mano_layer = ManoLayer(
+    #     mano_root="../../mano",  # Path to MANO model files
+    #     use_pca=False,  # Disable PCA, use full pose parameters
+    #     flat_hand_mean=True  # Start with the flat hand as the canonical pose
+    # )   
 
-    pose_params = torch.zeros(1, 48)  # Example: flat hand
-    pose_params[:, 3:] = torch.randn(1, 45)  # Random pose for fingers
+    # pose_params = torch.zeros(1, 48)  # Example: flat hand
+    # pose_params[:, 3:] = torch.randn(1, 45)  # Random pose for fingers
 
-    # Shape parameters: 10 PCA coefficients
-    shape_params = torch.zeros(1, 10)  # Example: canonical hand shape
+    # # Shape parameters: 10 PCA coefficients
+    # shape_params = torch.zeros(1, 10)  # Example: canonical hand shape
 
-    # Global translation
-    translation = torch.tensor([[0.0, 0.0, 0.0]])  # Centered at origin
+    # # Global translation
+    # translation = torch.tensor([[0.0, 0.0, 0.0]])  # Centered at origin
 
-    hand_verts, hand_joints = mano_layer(
-        th_pose_coeffs=pose_params,
-        th_betas=shape_params,
-        th_trans=translation
-    )
+    # hand_verts, hand_joints = mano_layer(
+    #     th_pose_coeffs=pose_params,
+    #     th_betas=shape_params,
+    #     th_trans=translation
+    # )
 
-    transformed_mesh = hand_verts.detach().numpy()[0]  # Transformed vertices
-    faces = mano_layer.th_faces.numpy()
+    # transformed_mesh = hand_verts.detach().numpy()[0]  # Transformed vertices
+    # faces = mano_layer.th_faces.numpy()
     for i in range(len(lhand_transl)):
         pose = lhand_fullpose[i]  # flat hand
         orient = lhand_global_orient[i]  # no rotation
         trans = lhand_transl[i]  # no translation
-        # Get keypoints
-        keypoints = get_keypoints_from_mano_params(pose, orient, trans)
+
+        poses = torch.tensor(pose).reshape(1, -1)
+        shapes = torch.tensor(betas, dtype=torch.float32).reshape(1, -1)
+        Rh = torch.tensor(orient).reshape(1, -1)
+        Th = torch.tensor(trans).reshape(1, -1)
+        # output = mano(global_orient=torch.tensor(params['translation']),
+        #       hand_pose=torch.tensor(params['pose']))
+        mano_vertices = mano(
+            poses=poses,
+            shapes=shapes,
+            Rh=Rh,
+            Th=Th)
+        # mano_vertices = output.vertices.detach().cpu().numpy()
+        if len(mano_vertices.shape) == 3:
+            mano_vertices = mano_vertices[0]
+        original_vertices_np = np.array(original_lhand_vertices, dtype=np.float32)
+        mano_vertices_np = np.array(mano_vertices, dtype=np.float32)
+        mano_mean = np.mean(mano_vertices_np, axis=0)
+        mano_centered = mano_vertices_np - mano_mean
+
+        # transformed_vertices = original_vertices_np + (mano_vertices - mano_vertices.mean(axis=0))
+        transformed_vertices = original_vertices_np + mano_centered
+        final_hand_mesh = trimesh.Trimesh(vertices=mano_vertices_np, faces=mano.faces)
+
+        # Save as PLY
+        out_dir = "../../processed_data/tools/subject_meshes/male/s1_lhand/"
+        final_hand_mesh.export(f"{out_dir}/{i}.ply")
+        # # Get keypoints
+        # keypoints = get_keypoints_from_mano_params(pose, orient, trans)
         
-        # Map back to parameters
-        mano_layer = ManoLayer(
-            mano_root="../../mano",
-            use_pca=False,
-            ncomps=45,
-            flat_hand_mean=True
-        )
+        # # Map back to parameters
+        # mano_layer = ManoLayer(
+        #     mano_root="../../mano",
+        #     use_pca=False,
+        #     ncomps=45,
+        #     flat_hand_mean=True
+        # )
         
-        params = map_keypoints_to_mano_params(keypoints, mano_layer)
+        # params = map_keypoints_to_mano_params(keypoints, mano_layer)
