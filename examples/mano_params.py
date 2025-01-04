@@ -27,10 +27,12 @@ if __name__ == "__main__":
     beta_file = "../../processed_data/tools/subject_meshes/male/s1_lhand_betas.npy"
     # Load the beta file
     betas = np.load(beta_file)
-    lhand_mesh = trimesh.load(mesh_file)
+    canonical_mesh = trimesh.load(mesh_file)
 
-    original_lhand_vertices = lhand_mesh.vertices
-    faces = lhand_mesh.faces
+    
+    canonical_vertices = canonical_mesh.vertices
+    canonical_faces = canonical_mesh.faces
+
 
     npz_file = "../../processed_data/grab/s1/airplane_fly_1.npz"
     data = np.load(npz_file, allow_pickle=True)
@@ -73,14 +75,29 @@ if __name__ == "__main__":
         if len(mano_vertices.shape) == 3:
             mano_vertices = mano_vertices[0]
 
-        original_vertices_np = np.array(original_lhand_vertices, dtype=np.float32)
-        mano_vertices_np = np.array(mano_vertices, dtype=np.float32)
-        mano_mean = np.mean(mano_vertices_np, axis=0)
-        mano_centered = mano_vertices_np - mano_mean
+        # original_vertices_np = np.array(original_lhand_vertices, dtype=np.float32)
+        # mano_vertices_np = np.array(mano_vertices, dtype=np.float32)
+        # mano_mean = np.mean(mano_vertices_np, axis=0)
+        # mano_centered = mano_vertices_np - mano_mean
 
+        # Convert to numpy for processing
+        mano_vertices_np = np.array(mano_vertices, dtype=np.float32)
+        canonical_vertices_np = np.array(canonical_vertices, dtype=np.float32)
+
+        # Apply deformation to canonical mesh
+        # Option 1: Direct displacement
+        deformation = mano_vertices_np - np.mean(mano_vertices_np, axis=0)
+        deformed_vertices = canonical_vertices_np + deformation
+        
         # transformed_vertices = original_vertices_np + (mano_vertices - mano_vertices.mean(axis=0))
-        transformed_vertices = original_vertices_np + mano_centered
-        final_hand_mesh = trimesh.Trimesh(vertices=mano_vertices_np, faces=mano.faces)
+        # transformed_vertices = original_vertices_np + mano_centered
+        # final_hand_mesh = trimesh.Trimesh(vertices=mano_vertices_np, faces=mano.faces)
+        # Create mesh using canonical topology
+        final_hand_mesh = trimesh.Trimesh(
+            vertices=canonical_vertices_np,
+            faces=canonical_faces  # Use canonical mesh topology
+        )
+
 
         # Save as PLY
         out_dir = "../../processed_data/tools/subject_meshes/male/s1_lhand/"
