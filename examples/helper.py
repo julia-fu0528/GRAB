@@ -1,11 +1,15 @@
 # load npz file
 import numpy as np
 import os
+from os.path import join
 import torch
+import argparse
 import sys
 import smplx
 # from trimesh import Trimesh
 import trimesh
+from easymocap.dataset import CONFIG
+from easymocap.pipeline import smpl_from_keypoints3d2d, smpl_from_keypoints3d
 from scipy.spatial.transform import Rotation as R
 
 def load_model(gender='neutral', use_cuda=True, model_type='smpl', skel_type='body25', device=None, model_path='data/smplx', **kwargs):
@@ -42,6 +46,24 @@ def load_model(gender='neutral', use_cuda=True, model_type='smpl', skel_type='bo
     body_model.to(device)
     return body_model
 
+
+# data = torch.load("../../processed_data/parms/GRAB_V00/train/body_data.pt")
+# print(f"body_data: {data}")
+# sys.exit()
+
+
+parser = argparse.ArgumentParser("GRAB Argument Parser")
+parser.add_argument("--use_optim_params", action="store_true")
+parser.add_argument("--to_smooth", action="store_true", help="Whether to temporally smoothing the result")
+parser.add_argument("--use_filtered", action="store_true", help="Whether to use only filtered keypoints (binned)")
+parser.add_argument('--body', type=str, default='body25', choices=['body15', 'body25', 'h36m', 'bodyhand', 'bodyhandface', 'handl', 'handr', 'handlr', 'total'])
+parser.add_argument('--model', type=str, default='smpl', choices=['smpl', 'smplh', 'smplx', 'manol', 'manor'])
+args = parser.parse_args()
+
+
+
+
+
 npz_file = "../../processed_data/grab/s1/airplane_fly_1.npz"
 data = np.load(npz_file, allow_pickle=True)
 body = data['body']
@@ -63,14 +85,14 @@ vtemp = body.item().get('vtemp')
 lhand_params = data['lhand'].item().get('params')
 lhand_global_orient = lhand_params['global_orient']
 lhand_pose = lhand_params['hand_pose'] # 24
-lhand_transl = lhand_params['transl']
+lhand_transl = lhand_params['transl'] 
 lhand_fullpose = lhand_params['fullpose'] # 45
 lhand_vtemp = data['lhand'].item().get('vtemp')
 
 
 mesh_file = "../../processed_data/tools/subject_meshes/male/s1_lhand.ply"
 lhand_mesh = trimesh.load(mesh_file)
-
+# lhand_mesh.show()
 # Access the mesh's vertices and faces
 original_lhand_vertices = lhand_mesh.vertices
 faces = lhand_mesh.faces
@@ -79,20 +101,44 @@ model_path = "../../mano/MANO_LEFT.pkl"
 # from mano import MANO
 # lhand_mano = MANO(model_path, ncomps=45, flat_hand_mean=True)
 # mano_model = smplx.create(model_path=model_path, model_type='mano', batch_size=1)
-body_model_left = load_model(model_type="manol", model_path="data/smplx", num_pca_comps=6, use_pose_blending=True, use_shape_blending=True, use_pca=False, use_flat_mean=False)
+body_model_left = load_model(model_type="manol", model_path="../data/smplx", num_pca_comps=6, use_pose_blending=True, use_shape_blending=True, use_pca=False, use_flat_mean=False)
 out_dir = "../../processed_data/tools/subject_meshes/male/s1_lhand/"
 os.makedirs(out_dir, exist_ok=True)
+
+weight_pose = {
+    'k3d': 1e2,           # Weight for 3D keypoint fitting loss
+    'k2d': 2e-3,          # Weight for 2D keypoint fitting loss
+    'reg_poses': 1e-3,    # Weight for regularizing pose parameters
+    'smooth_body': 1e2,   # Weight for smoothing body parameters
+    'smooth_poses': 1e2,  # Weight for smoothing pose parameters
+}
+
+dataset_config = CONFIG['handl']
+
 for i in range(len(lhand_transl)):
     global_orient = torch.tensor(lhand_global_orient[i], dtype=torch.float32)
     print(f"global_orient: {global_orient.shape}")
     hand_pose = torch.tensor(lhand_pose[i], dtype=torch.float32)
     print(f"hand_pose: {hand_pose.shape}")
     transl = torch.tensor(lhand_transl[i], dtype=torch.float32)
-    global_orient = global_orient.unsqueeze(0)  # Shape: [1, 3]
-    hand_pose = hand_pose.unsqueeze(0)          # Shape: [1, 24]
-    transl = transl.unsqueeze(0)
+    global_orient_left = global_orient.unsqueeze(0)  # Shape: [1, 3]
+    hand_pose_left = hand_pose.unsqueeze(0)          # Shape: [1, 24]
+    translation_left = transl.unsqueeze(0)
     print(f"transl: {transl.shape}")
 
+    params_left = smpl_from_keypoints3d(
+        body_model_left,
+        kp3ds=None,  # Replace or set to None
+        config=dataset_config,
+        args=args,
+        global_orient=global_orient_left,  # Add global orientation
+        hand_pose=hand_pose_left,              # Add hand pose
+        transl=translation_left,               # Add translation
+        weight_shape={'s3d': 1e5, 'reg_shapes': 5e3},
+        weight_pose=weight_pose
+    )
+
+    sys.exit()
     output = body_model_left(global_orient=global_orient, hand_pose=hand_pose, transl=transl)
     vertices = output.vertices
     faces = body_model_left.faces
