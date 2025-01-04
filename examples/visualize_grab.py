@@ -36,7 +36,8 @@ def visualize_sequences(cfg):
 
     grab_path = cfg.grab_path
 
-    all_seqs = glob.glob(grab_path + '/*/*eat*.npz')
+    # all_seqs = glob.glob(grab_path + '/*/*eat*.npz')
+    all_seqs = glob.glob(grab_path + '/airplane_fly_1.npz')
     # all_seqs = [seq for seq in all_seqs if 'verts_body' not in os.path.basename(os.path.dirname(seq))
     #                                     and 'verts_object' not in os.path.basename(os.path.dirname(seq))]
 
@@ -49,21 +50,29 @@ def visualize_sequences(cfg):
     camera_pose[:3, 3] = np.array([-.5, -4., 1.5])
     mv.update_camera_pose(camera_pose)
 
-    choice = np.random.choice(len(all_seqs), 10, replace=False)
+    # choice = np.random.choice(len(all_seqs), 10, replace=False)
+    choice = np.random.choice(len(all_seqs), 10, replace=True)
     for i in tqdm(choice):
         vis_sequence(cfg,all_seqs[i], mv)
     mv.close_viewer()
 
 
 def vis_sequence(cfg,sequence, mv):
-
+        # print(f"sequence: {sequence}")
+        # print(f"grab_path: {grab_path}")
         seq_data = parse_npz(sequence)
+        # print(f"seq_data: {seq_data.body['vtemp']}")
         n_comps = seq_data['n_comps']
         gender = seq_data['gender']
 
         T = seq_data.n_frames
+        grab_path_root = '/'.join(grab_path.split('/')[:-2])
+        print(f"grab_path_root: {grab_path_root}")
+        # sbj_mesh = os.path.join(grab_path, '..',seq_data.body.vtemp)
+        sbj_mesh = os.path.join(grab_path_root, seq_data.body['vtemp'])
+        print(f"sbj_mesh: {sbj_mesh}")
+        print(f"Does file exist? {os.path.exists(sbj_mesh)}")
 
-        sbj_mesh = os.path.join(grab_path, '..', seq_data.body.vtemp)
         sbj_vtemp = np.array(Mesh(filename=sbj_mesh).vertices)
 
         sbj_m = smplx.create(model_path=cfg.model_path,
@@ -77,7 +86,8 @@ def vis_sequence(cfg,sequence, mv):
         verts_sbj = to_cpu(sbj_m(**sbj_parms).vertices)
 
 
-        obj_mesh = os.path.join(grab_path, '..', seq_data.object.object_mesh)
+        # obj_mesh = os.path.join(grab_path, '..', seq_data.object.object_mesh)
+        obj_mesh = os.path.join(grab_path_root, seq_data.object.object_mesh)
         obj_mesh = Mesh(filename=obj_mesh)
         obj_vtemp = np.array(obj_mesh.vertices)
         obj_m = ObjectModel(v_template=obj_vtemp,
@@ -85,7 +95,8 @@ def vis_sequence(cfg,sequence, mv):
         obj_parms = params2torch(seq_data.object.params)
         verts_obj = to_cpu(obj_m(**obj_parms).vertices)
 
-        table_mesh = os.path.join(grab_path, '..', seq_data.table.table_mesh)
+        # table_mesh = os.path.join(grab_path, '..', seq_data.table.table_mesh)
+        table_mesh = os.path.join(grab_path_root, seq_data.table.table_mesh)
         table_mesh = Mesh(filename=table_mesh)
         table_vtemp = np.array(table_mesh.vertices)
         table_m = ObjectModel(v_template=table_vtemp,
