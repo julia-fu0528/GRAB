@@ -29,18 +29,25 @@ from tools.utils import params2torch
 from tools.utils import to_cpu
 from tools.utils import euler
 from tools.cfg_parser import Config
+from easymocap.bodymodel.smplx import MANO
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+class Config(dict):
+    """A dictionary that supports both dict-style and attribute-style access"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__dict__ = self  # Allow attribute-style access
+
 
 def visualize_sequences(cfg):
 
     grab_path = cfg.grab_path
+    # session = cfg.session
 
-    # all_seqs = glob.glob(grab_path + '/*/*eat*.npz')
-    all_seqs = glob.glob(grab_path + '/airplane_fly_1.npz')
-    # all_seqs = [seq for seq in all_seqs if 'verts_body' not in os.path.basename(os.path.dirname(seq))
-    #                                     and 'verts_object' not in os.path.basename(os.path.dirname(seq))]
-
+    all_seqs = glob.glob(grab_path + '/*/*.npz')
+    # all_seqs = glob.glob(grab_path + f'/{session}.npz')
 
     mv = MeshViewer(offscreen=False)
 
@@ -51,57 +58,79 @@ def visualize_sequences(cfg):
     mv.update_camera_pose(camera_pose)
 
     # choice = np.random.choice(len(all_seqs), 10, replace=False)
-    choice = np.random.choice(len(all_seqs), 10, replace=True)
-    for i in tqdm(choice):
+    # choice = np.random.choice(len(all_seqs), 10, replace=True)
+    # for i in tqdm(choice):
+    for i, seq in tqdm(enumerate(all_seqs)):
         if i > 0:
             break
-        vis_sequence(cfg,all_seqs[i], mv)
+        vis_sequence(cfg,seq, mv)
     mv.close_viewer()
 
 
 def vis_sequence(cfg,sequence, mv):
-        # print(f"sequence: {sequence}")
-        # print(f"grab_path: {grab_path}")
         seq_data = parse_npz(sequence)
-        # print(f"seq_data: {seq_data.body['vtemp']}")
         n_comps = seq_data['n_comps']
         gender = seq_data['gender']
+        sbj_id = seq_data['sbj_id']
+        motion = sequence.split("/")[-1].split(".")[0]
+        obj = seq_data['obj_name']
 
         T = seq_data.n_frames
         grab_path_root = '/'.join(grab_path.split('/')[:-2])
-        # sbj_mesh = os.path.join(grab_path, '..',seq_data.body.vtemp)
-        sbj_mesh = os.path.join(grab_path_root, seq_data.body['vtemp'])
+        # get hand mesh
+        lhand_mesh = os.path.join(grab_path_root, "processed_data", seq_data.lhand['vtemp'])
+        rhand_mesh = os.path.join(grab_path_root, "processed_data", seq_data.rhand['vtemp'])
+        # get smplx hand pose
+        smplx_left_hand_pose = seq_data.body.params['left_hand_pose']
+        smplx_right_hand_pose = seq_data.body.params['right_hand_pose']
+        # align hand pose
+        seq_data.lhand.params['hand_pose'] = seq_data.body.params['left_hand_pose']
+        seq_data.rhand.params['hand_pose'] = seq_data.body.params['right_hand_pose'] 
+        # get vertices
+        lhand_vtemp = np.array(Mesh(filename=lhand_mesh).vertices)  
+        rhand_vtemp = np.array(Mesh(filename=rhand_mesh).vertices)
 
-        sbj_vtemp = np.array(Mesh(filename=sbj_mesh).vertices)
 
+
+        right_beta_file = "../../processed_data/tools/subject_meshes/male/s1_rhand_betas.npy"
+        right_betas = np.load(right_beta_file)
+        
+
+        if len(right_betas.shape) == 1:
+            right_betas = right_betas[np.newaxis, :]  # Add batch dimension [1, 10]
+            right_betas = np.tile(right_betas, (T, 1))
+
+        # manor_model_path = "../../mano/MANO_RIGHT.pkl"
+        print(f"cfg.model_path: {cfg.model_path}")
+        manor_model_path = "../../mano/MANO_RIGHT.pkl"
+
+        cfg_hand = Config({
+        'use_pca': False,
+        'use_flat_mean': True,
+        'num_pca_comps': 6
+        })
+
+        # seq_data.rhand['params']['betas'] = right_betas
+        # hand_cfg = Config(**hand_cfg)
         sbj_m = smplx.create(model_path=cfg.model_path,
-                             model_type='smplx',
-                             gender=gender,
+                             model_type='mano',
+                            #  gender=gender,
                              num_pca_comps=n_comps,
-                             v_template=sbj_vtemp,
+                             v_template=rhand_vtemp,
                              batch_size=T)
 
-        sbj_parms = params2torch(seq_data.body.params)
+        sbj_parms = params2torch(seq_data.rhand.params)
         verts_sbj = to_cpu(sbj_m(**sbj_parms).vertices)
 
 
         # obj_mesh = os.path.join(grab_path, '..', seq_data.object.object_mesh)
-        obj_mesh = os.path.join(grab_path_root, seq_data.object.object_mesh)
+        obj_mesh = os.path.join(grab_path_root, "processed_data", seq_data.object.object_mesh)
         obj_mesh = Mesh(filename=obj_mesh)
         obj_vtemp = np.array(obj_mesh.vertices)
         obj_m = ObjectModel(v_template=obj_vtemp,
                             batch_size=T)
         obj_parms = params2torch(seq_data.object.params)
         verts_obj = to_cpu(obj_m(**obj_parms).vertices)
-
-        # table_mesh = os.path.join(grab_path, '..', seq_data.table.table_mesh)
-        table_mesh = os.path.join(grab_path_root, seq_data.table.table_mesh)
-        table_mesh = Mesh(filename=table_mesh)
-        table_vtemp = np.array(table_mesh.vertices)
-        table_m = ObjectModel(v_template=table_vtemp,
-                            batch_size=T)
-        table_parms = params2torch(seq_data.table.params)
-        verts_table = to_cpu(table_m(**table_parms).vertices)
 
         skip_frame = 4
         out_root = "../../processed_data/tools/test"
@@ -110,16 +139,15 @@ def vis_sequence(cfg,sequence, mv):
             if frame < 300 or frame > 310:
                 continue
             o_mesh = Mesh(vertices=verts_obj[frame], faces=obj_mesh.faces, vc=colors['yellow'])
-            o_mesh.set_vertex_colors(vc=colors['red'], vertex_ids=seq_data['contact']['object'][frame] > 0)
             o_mesh.export(os.path.join(out_root, f'{frame}_o_mesh.ply'))
+            # o_mesh.set_vertex_colors(vc=colors['red'], vertex_ids=seq_data['contact']['object'][frame] > 0)
 
-            s_mesh = Mesh(vertices=verts_sbj[frame], faces=sbj_m.faces, vc=colors['pink'], smooth=True)
-            s_mesh.set_vertex_colors(vc=colors['red'], vertex_ids=seq_data['contact']['body'][frame] > 0)
+            s_mesh = Mesh(vertices=verts_sbj[frame], faces=sbj_m.faces, vc=colors['red'], smooth=True)
             s_mesh.export(os.path.join(out_root, f'{frame}_s_mesh.ply'))
+            # s_mesh.set_vertex_colors(vc=colors['red'], vertex_ids=seq_data['contact']['body'][frame] > 0)
 
-            t_mesh = Mesh(vertices=verts_table[frame], faces=table_mesh.faces, vc=colors['white'])
 
-            mv.set_static_meshes([o_mesh, s_mesh, t_mesh])
+            mv.set_static_meshes([o_mesh, s_mesh])
 
 
 if __name__ == '__main__':
@@ -132,11 +160,14 @@ if __name__ == '__main__':
 
     parser.add_argument('--model-path', required=True, type=str,
                         help='The path to the folder containing smplx models')
+    # parser.add_argument('--session', required=True, type=str,
+                        # help='The action sequence name')
 
     args = parser.parse_args()
 
     grab_path = args.grab_path
     model_path = args.model_path
+    # session = args.session
 
     # grab_path = 'PATH_TO_DOWNLOADED_GRAB_DATA/grab'
     # model_path = 'PATH_TO_DOWNLOADED_MODELS_FROM_SMPLX_WEBSITE/'
@@ -144,6 +175,7 @@ if __name__ == '__main__':
     cfg = {
         'grab_path': grab_path,
         'model_path': model_path,
+        # 'session': session
     }
 
     cfg = Config(**cfg)

@@ -6,8 +6,7 @@ import os
 from tqdm import tqdm
 import sys
 from collections.abc import Mapping
-from scipy.spatial.transform import Rotation
-
+from scipy.spatial.transform import Rotation as R
 easymocap_path = os.path.abspath("../../third-party/EasyMocap")
 sys.path.append(easymocap_path)
 from easymocap.dataset import CONFIG
@@ -42,8 +41,12 @@ if __name__ == "__main__":
     obj_canonical_mesh = trimesh.load(obj_mesh_file)
 
     left_canonical_vertices = left_canonical_mesh.vertices
+    left_canonical_vertices -= left_canonical_vertices.mean(axis=0)
     right_canonical_vertices = right_canonical_mesh.vertices
+    right_canonical_vertices -= right_canonical_vertices.mean(axis=0)
     obj_canonical_vertices = obj_canonical_mesh.vertices
+    obj_canonical_vertices -= obj_canonical_vertices.mean(axis=0)
+
 
     left_canonical_faces = left_canonical_mesh.faces
     right_canonical_faces = right_canonical_mesh.faces
@@ -101,6 +104,9 @@ if __name__ == "__main__":
     os.makedirs(obj_out_dir, exist_ok=True)
 
     for i in tqdm(range(len(lhand_transl))):
+        if i < 300 or i > 310:
+            continue
+
         # Left hand
         posel = lhand_fullpose[i]  # flat hand
         orientl = lhand_global_orient[i]  # no rotation
@@ -126,12 +132,15 @@ if __name__ == "__main__":
         right_Rh = torch.tensor(orientr).reshape(1, -1)
         right_Th = torch.tensor(transr).reshape(1, -1)
 
-        obj_rot_mat = Rotation.from_rotvec(oriento).as_matrix()
+        obj_rot_mat = R.from_rotvec(oriento).as_matrix()
         obj_vertices = obj_canonical_vertices.copy()
-        # Apply rotation
-        obj_vertices = np.dot(obj_vertices, obj_rot_mat.T)
-        # Apply translation
-        obj_vertices = obj_vertices + transo
+        # obj_vertices = np.dot(obj_vertices, obj_rot_mat.T)
+        # obj_vertices = obj_vertices + transo
+        rotation = R.from_euler('xyz', oriento, degrees=False)
+        R_matrix = rotation.as_matrix()
+        obj_vertices = (obj_rot_mat @ obj_vertices.T).T + trans
+        # ransformed_vertices = (obj_rot_mat @ obj_vertices.T).T + transo
+
 
         # fit the mano model
         manol_vertices = manol(poses=left_poses, shapes=left_shapes, Rh=left_Rh, Th=left_Th, return_tensor=False)
@@ -145,7 +154,6 @@ if __name__ == "__main__":
         # # Convert to numpy for processing
         # manol_vertices_np = np.array(manol_vertices, dtype=np.float32)
         # canonical_vertices_np = np.array(canonical_vertices, dtype=np.float32)
-
         # Apply deformation to canonical mesh
         # Option 1: Direct displacement
         # left_deformation = manol_vertices - np.mean(manol_vertices, axis=0)
