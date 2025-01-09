@@ -2,4 +2,5 @@
 
 echo "########################### SAVE MESHES ###########################"
 python save_mesh.py --grab-path /oscar/home/wfu16/data/users/wfu16/GRAB/processed_data/grab \
-                    --model-path /oscar/home/wfu16/data/users/wfu16/GRAB
+                    --model-path /oscar/home/wfu16/data/users/wfu16/GRAB \
+                    --out-path /oscar/home/wfu16/data/users/wfu16/GRAB/processed_data/vis

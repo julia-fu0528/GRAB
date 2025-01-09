@@ -44,10 +44,26 @@ class Config(dict):
 def visualize_sequences(cfg):
 
     grab_path = cfg.grab_path
-    # session = cfg.session
 
     all_seqs = glob.glob(grab_path + '/*/*.npz')
-    # all_seqs = glob.glob(grab_path + f'/{session}.npz')
+    all_seqs = [seq for seq in all_seqs if 'verts_body' not in seq.split("/")[-1]
+                                        and 'verts_object' not in seq.split("/")[-1]]
+    exclude_sbj = ['s1', 's10', 's2', 's3', 's4']
+    all_seqs = [seq for seq in all_seqs if seq.split("/")[-2] not in exclude_sbj]
+    exclude_s5_act = ['airplane_lift', 'airplane_pass_1', 'alarmclock_lift', 'alarmclock_pass_1',
+                        'alarmclock_see_1', 'apple_pass_1', 'banana_pass_1',  'banana_peel_2',
+                        'binoculars_lift', 'binoculars_pass_1', 'binoculars_see_1', 'bowl_drink_1', 'bowl_drink_2',
+                        'bowl_pass_1', 'camera_pass_1', 'camera_takepicture_3', 'cubelarge_inspect_1',
+                        'cubelarge_lift', 'cubelarge_pass_1', 'cubemedium_inspect_1', 
+                        'cubemedium_lift', 'cubemedium_pass_1', 'cubesmall_inspect_1', 
+                        'cubesmall_lift', '	cubesmall_pass_1', 'cup_drink_2', 'cup_lift', 'cup_pass_1',
+                        'cup_pour_1', 'cylinderlarge_inspect_1', 'cylinderlarge_lift', 
+                        'cylinderlarge_pass_1', 'cylindermedium_inspect_1', 'cylindermedium_lift',
+                        'cylindermedium_pass_1', 'cylindersmall_inspect_1', 'cylindersmall_pass_1',
+                        'doorknob_lift', 'duck_inspect_1', 'duck_lift', 'duck_pass_1', 'elephant_inspect_1',
+                        'elephant_lift', '	elephant_pass_1', 'eyeglasses_clean_2', 'flashlight_on_1',
+                        'flashlight_on_2', 'flute_pass_1', 'flute_play_1', 'flute_play_2']
+    all_seqs = [seq for seq in all_seqs if seq.split("/")[-2] != 's5' or seq.split("/")[-1].split(".")[0] not in exclude_s5_act]
 
     mv = MeshViewer(offscreen=False)
 
@@ -57,12 +73,7 @@ def visualize_sequences(cfg):
     camera_pose[:3, 3] = np.array([-.5, -4., 1.5])
     mv.update_camera_pose(camera_pose)
 
-    # choice = np.random.choice(len(all_seqs), 10, replace=False)
-    # choice = np.random.choice(len(all_seqs), 10, replace=True)
-    # for i in tqdm(choice):
     for i, seq in tqdm(enumerate(all_seqs)):
-        if i > 0:
-            break
         vis_sequence(cfg,seq, mv)
     mv.close_viewer()
 
@@ -73,7 +84,6 @@ def vis_sequence(cfg,sequence, mv):
         gender = seq_data['gender']
         sbj_id = seq_data['sbj_id']
         motion = sequence.split("/")[-1].split(".")[0]
-        obj = seq_data['obj_name']
 
         T = seq_data.n_frames
         grab_path_root = '/'.join(grab_path.split('/')[:-2])
@@ -90,38 +100,21 @@ def vis_sequence(cfg,sequence, mv):
         lhand_vtemp = np.array(Mesh(filename=lhand_mesh).vertices)  
         rhand_vtemp = np.array(Mesh(filename=rhand_mesh).vertices)
 
-
-
-        right_beta_file = "../../processed_data/tools/subject_meshes/male/s1_rhand_betas.npy"
-        right_betas = np.load(right_beta_file)
+        # fit mano model
+        manol = smplx.create(model_path=cfg.model_path, model_type='mano',
+                                num_pca_comps=n_comps, v_template=lhand_vtemp,
+                                batch_size=T, is_rhand=False)
+        manor = smplx.create(model_path=cfg.model_path, model_type='mano',
+                               num_pca_comps=n_comps, v_template=rhand_vtemp,
+                               batch_size=T, is_rhand=True)
+                        
+        # get hand params
+        lhand_parms = params2torch(seq_data.lhand.params)
+        rhand_parms = params2torch(seq_data.rhand.params)
+        # get vertices
+        verts_lhand = to_cpu(manol(**lhand_parms).vertices)
+        verts_rhand = to_cpu(manor(**rhand_parms).vertices)
         
-
-        if len(right_betas.shape) == 1:
-            right_betas = right_betas[np.newaxis, :]  # Add batch dimension [1, 10]
-            right_betas = np.tile(right_betas, (T, 1))
-
-        # manor_model_path = "../../mano/MANO_RIGHT.pkl"
-        print(f"cfg.model_path: {cfg.model_path}")
-        manor_model_path = "../../mano/MANO_RIGHT.pkl"
-
-        cfg_hand = Config({
-        'use_pca': False,
-        'use_flat_mean': True,
-        'num_pca_comps': 6
-        })
-
-        # seq_data.rhand['params']['betas'] = right_betas
-        # hand_cfg = Config(**hand_cfg)
-        sbj_m = smplx.create(model_path=cfg.model_path,
-                             model_type='mano',
-                            #  gender=gender,
-                             num_pca_comps=n_comps,
-                             v_template=rhand_vtemp,
-                             batch_size=T)
-
-        sbj_parms = params2torch(seq_data.rhand.params)
-        verts_sbj = to_cpu(sbj_m(**sbj_parms).vertices)
-
 
         # obj_mesh = os.path.join(grab_path, '..', seq_data.object.object_mesh)
         obj_mesh = os.path.join(grab_path_root, "processed_data", seq_data.object.object_mesh)
@@ -133,21 +126,25 @@ def vis_sequence(cfg,sequence, mv):
         verts_obj = to_cpu(obj_m(**obj_parms).vertices)
 
         skip_frame = 4
-        out_root = "../../processed_data/tools/test"
-        os.makedirs(out_root, exist_ok=True)
-        for frame in range(0,T, skip_frame):
-            if frame < 300 or frame > 310:
-                continue
-            o_mesh = Mesh(vertices=verts_obj[frame], faces=obj_mesh.faces, vc=colors['yellow'])
-            o_mesh.export(os.path.join(out_root, f'{frame}_o_mesh.ply'))
-            # o_mesh.set_vertex_colors(vc=colors['red'], vertex_ids=seq_data['contact']['object'][frame] > 0)
+        obj_out_dir = os.path.join(cfg.out_path, motion, sbj_id, "obj")
+        lhand_out_dir = os.path.join(cfg.out_path, motion, sbj_id, "lhand")
+        rhand_out_dir = os.path.join(cfg.out_path, motion, sbj_id, "rhand")
+        os.makedirs(obj_out_dir, exist_ok=True)
+        os.makedirs(lhand_out_dir, exist_ok=True)
+        os.makedirs(rhand_out_dir, exist_ok=True)
 
-            s_mesh = Mesh(vertices=verts_sbj[frame], faces=sbj_m.faces, vc=colors['red'], smooth=True)
-            s_mesh.export(os.path.join(out_root, f'{frame}_s_mesh.ply'))
-            # s_mesh.set_vertex_colors(vc=colors['red'], vertex_ids=seq_data['contact']['body'][frame] > 0)
+        for frame in range(0,T):
+            # object
+            o_mesh = Mesh(vertices=verts_obj[frame], faces=obj_mesh.faces)
+            o_mesh.export(os.path.join(obj_out_dir, f'{frame}.ply'))
+            # left hand
+            l_mesh = Mesh(vertices=verts_lhand[frame], faces=manol.faces, smooth=True)
+            l_mesh.export(os.path.join(lhand_out_dir, f'{frame}.ply'))
+            # right hand
+            r_mesh = Mesh(vertices=verts_rhand[frame], faces=manor.faces, smooth=True)
+            r_mesh.export(os.path.join(rhand_out_dir, f'{frame}.ply'))
 
-
-            mv.set_static_meshes([o_mesh, s_mesh])
+            mv.set_static_meshes([o_mesh, l_mesh, r_mesh])
 
 
 if __name__ == '__main__':
@@ -160,14 +157,14 @@ if __name__ == '__main__':
 
     parser.add_argument('--model-path', required=True, type=str,
                         help='The path to the folder containing smplx models')
-    # parser.add_argument('--session', required=True, type=str,
-                        # help='The action sequence name')
+    parser.add_argument('--out-path', required=True, type=str,
+                        help='The action sequence name')
 
     args = parser.parse_args()
 
     grab_path = args.grab_path
     model_path = args.model_path
-    # session = args.session
+    out_path = args.out_path
 
     # grab_path = 'PATH_TO_DOWNLOADED_GRAB_DATA/grab'
     # model_path = 'PATH_TO_DOWNLOADED_MODELS_FROM_SMPLX_WEBSITE/'
@@ -175,7 +172,7 @@ if __name__ == '__main__':
     cfg = {
         'grab_path': grab_path,
         'model_path': model_path,
-        # 'session': session
+        'out_path': out_path
     }
 
     cfg = Config(**cfg)
