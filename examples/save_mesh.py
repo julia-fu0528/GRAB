@@ -42,29 +42,11 @@ class Config(dict):
 
 
 def visualize_sequences(cfg):
-
     grab_path = cfg.grab_path
 
     all_seqs = glob.glob(grab_path + '/*/*.npz')
     all_seqs = [seq for seq in all_seqs if 'verts_body' not in seq.split("/")[-1]
                                         and 'verts_object' not in seq.split("/")[-1]]
-    exclude_sbj = ['s1', 's10', 's2', 's3', 's4']
-    all_seqs = [seq for seq in all_seqs if seq.split("/")[-2] not in exclude_sbj]
-    exclude_s5_act = ['airplane_lift', 'airplane_pass_1', 'alarmclock_lift', 'alarmclock_pass_1',
-                        'alarmclock_see_1', 'apple_pass_1', 'banana_pass_1',  'banana_peel_2',
-                        'binoculars_lift', 'binoculars_pass_1', 'binoculars_see_1', 'bowl_drink_1', 'bowl_drink_2',
-                        'bowl_pass_1', 'camera_pass_1', 'camera_takepicture_3', 'cubelarge_inspect_1',
-                        'cubelarge_lift', 'cubelarge_pass_1', 'cubemedium_inspect_1', 
-                        'cubemedium_lift', 'cubemedium_pass_1', 'cubesmall_inspect_1', 
-                        'cubesmall_lift', '	cubesmall_pass_1', 'cup_drink_2', 'cup_lift', 'cup_pass_1',
-                        'cup_pour_1', 'cylinderlarge_inspect_1', 'cylinderlarge_lift', 
-                        'cylinderlarge_pass_1', 'cylindermedium_inspect_1', 'cylindermedium_lift',
-                        'cylindermedium_pass_1', 'cylindersmall_inspect_1', 'cylindersmall_pass_1',
-                        'doorknob_lift', 'duck_inspect_1', 'duck_lift', 'duck_pass_1', 'elephant_inspect_1',
-                        'elephant_lift', '	elephant_pass_1', 'eyeglasses_clean_2', 'flashlight_on_1',
-                        'flashlight_on_2', 'flute_pass_1', 'flute_play_1', 'flute_play_2']
-    all_seqs = [seq for seq in all_seqs if seq.split("/")[-2] != 's5' or seq.split("/")[-1].split(".")[0] not in exclude_s5_act]
-
     mv = MeshViewer(offscreen=False)
 
     # set the camera pose
@@ -72,14 +54,19 @@ def visualize_sequences(cfg):
     camera_pose[:3, :3] = euler([80, -15, 0], 'xzx')
     camera_pose[:3, 3] = np.array([-.5, -4., 1.5])
     mv.update_camera_pose(camera_pose)
-
+    
     for i, seq in tqdm(enumerate(all_seqs)):
+        if i != 1:
+            continue
         vis_sequence(cfg,seq, mv)
     mv.close_viewer()
 
 
 def vis_sequence(cfg,sequence, mv):
         seq_data = parse_npz(sequence)
+        contact = seq_data['contact']
+        print(f"contact: {contact.body.shape}")
+        sys.exit()
         n_comps = seq_data['n_comps']
         gender = seq_data['gender']
         sbj_id = seq_data['sbj_id']
