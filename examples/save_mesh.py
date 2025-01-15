@@ -30,6 +30,8 @@ from tools.utils import to_cpu
 from tools.utils import euler
 from tools.cfg_parser import Config
 from easymocap.bodymodel.smplx import MANO
+import pickle
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -44,7 +46,7 @@ class Config(dict):
 def visualize_sequences(cfg):
     grab_path = cfg.grab_path
 
-    all_seqs = glob.glob(grab_path + '/*/*.npz')
+    all_seqs = glob.glob(grab_path + '/s10/bowl_drink_1_Retake.npz')
     all_seqs = [seq for seq in all_seqs if 'verts_body' not in seq.split("/")[-1]
                                         and 'verts_object' not in seq.split("/")[-1]]
     mv = MeshViewer(offscreen=False)
@@ -56,17 +58,58 @@ def visualize_sequences(cfg):
     mv.update_camera_pose(camera_pose)
     
     for i, seq in tqdm(enumerate(all_seqs)):
-        if i != 1:
-            continue
         vis_sequence(cfg,seq, mv)
     mv.close_viewer()
+
+
+def seg(manol_mesh, manor_mesh):
+    sealed_faces = np.load("../data/sealed_faces.npy", allow_pickle=True).item()
+
+    right_hand_vertices = manor_mesh.vertices
+    left_hand_vertices = manol_mesh.vertices
+
+    right_faces = sealed_faces["sealed_faces_right"]
+    right_faces_color = sealed_faces["sealed_faces_color_right"]
+    left_faces = right_faces[:, [1, 0, 2]]
+    left_faces_color = right_faces_color
+
+    seg_dict = {}
+
+    for vertex_idx, vertex in enumerate(right_hand_vertices):
+        for i, (face, color) in enumerate(zip(right_faces, right_faces_color)):
+            if vertex_idx in face:
+                if str(color) not in seg_dict:
+                    seg_dict[str(color)] = [vertex_idx]
+                else:
+                    seg_dict[str(color)].append(vertex_idx)
+
+    return seg_dict
+    # for vertex_idx, vertex in enumerate(left_hand_vertices):
+    #     for i, (face, color) in enumerate(zip(left_faces, left_faces_color)):
+    #         if (vertex_idx - half_vertices) in face:
+    #             pass
 
 
 def vis_sequence(cfg,sequence, mv):
         seq_data = parse_npz(sequence)
         contact = seq_data['contact']
-        print(f"contact: {contact.body.shape}")
-        sys.exit()
+        
+        # load smplx mano mapping
+        # with open(cfg.smplx_path, 'rb') as f:
+            # vertex_mappings = pickle.load(f)
+        # vertex_mappings = np.load(cfg.smplx_path, allow_pickle=True)
+        # print(f"vertex_mappings: {vertex_mappings.keys()}")
+        # sys.exit()
+        # manol_vertex_ids = vertex_mappings['left_hand']
+        # manor_vertex_ids = vertex_mappings['right_hand']
+        fingers_vertex_ids = {'test': range(237, 243),
+                                'thumb':[104, 105, 123, 124], 
+                                'index': range(43, 69), 
+                                'middle': range(69, 95), 
+                                'ring': range(95, 121), 
+                                'pinky': range(121, 147), 
+                                'palm': range(147, 778)}
+
         n_comps = seq_data['n_comps']
         gender = seq_data['gender']
         sbj_id = seq_data['sbj_id']
@@ -89,7 +132,8 @@ def vis_sequence(cfg,sequence, mv):
 
         # fit mano model
         manol = smplx.create(model_path=cfg.model_path, model_type='mano',
-                                num_pca_comps=n_comps, v_template=lhand_vtemp,
+                                num_pca_comps=n_comps, 
+                                # v_template=lhand_vtemp,
                                 batch_size=T, is_rhand=False)
         manor = smplx.create(model_path=cfg.model_path, model_type='mano',
                                num_pca_comps=n_comps, v_template=rhand_vtemp,
@@ -120,16 +164,87 @@ def vis_sequence(cfg,sequence, mv):
         os.makedirs(lhand_out_dir, exist_ok=True)
         os.makedirs(rhand_out_dir, exist_ok=True)
 
+        l_mesh = Mesh(vertices=verts_lhand[0], faces=manol.faces, smooth=True)
+        r_mesh = Mesh(vertices=verts_rhand[0], faces=manor.faces, smooth=True)
+        seg_dict = seg(l_mesh, r_mesh)
+
+        # thumb_indices = seg_dict['9'] + seg_dict['12']
+        # ring_indices = seg_dict['0'] + seg_dict['5'] + seg_dict['15']
+        # index_indices = seg_dict['1'] + seg_dict['10'] + seg_dict['11']
+        # middle_indices = seg_dict['3'] + seg_dict['4'] + seg_dict['14']
+        # pinky_indices = seg_dict['2'] + seg_dict['6'] + seg_dict['13']
+        # palm_indices = seg_dict['7'] + seg_dict['8']
+        # thumb: 9, 12; ring: 0, 5, 15; index: 1, 10, 11; middle: 3, 4, 14; pinky: 2, 6, 13; palm: 7, 8
+
+        thumbl_indices = [38, 39 , 40]
+        thumbr_indices = [53, 54, 55]
+        indexl_indices = [26, 27, 28]
+        indexr_indices = [41, 42, 43]
+        middlel_indices = [29, 30, 31]
+        middler_indices = [44, 45, 46]
+        ringl_indices = [35, 36, 37]
+        ringr_indices = [50, 51, 52]
+        pinkyl_indices = [32, 33, 34]
+        pinkyr_indices = [47, 48, 49]
+        palml_indices = [21]
+        palmr_indices = [22]
+
+
+        contact_flow = []
+        obj_contact = contact['object']
+
+        colors_map = np.array([
+            [0, 0, 127],
+            [0, 0, 232],
+            [0, 56, 255],
+            [0, 148, 255],
+            [12, 244, 234],
+            [86, 255, 160],
+            [160, 255, 86],
+            [234, 255, 12],
+            [255, 170, 0],
+            [255, 85, 0],
+            [232, 0, 0],
+            [127, 0, 0]
+        ])
         for frame in range(0,T):
             # object
             o_mesh = Mesh(vertices=verts_obj[frame], faces=obj_mesh.faces)
-            o_mesh.export(os.path.join(obj_out_dir, f'{frame}.ply'))
+
+            frame_contact = obj_contact[frame]
+            frame_verts_obj = verts_obj[frame]
+            contact_flow.append({})
+            contact_dict = {}
+            # left
+            contact_dict['thumbl'] = [i for i in frame_contact if frame_contact[i] in thumbl_indices]
+            contact_dict['indexl'] = [i for i in frame_contact if frame_contact[i] in indexl_indices]
+            contact_dict['middlel'] = [i for i in frame_contact if frame_contact[i] in middlel_indices]
+            contact_dict['ringl'] = [i for i in frame_contact if frame_contact[i] in ringl_indices]
+            contact_dict['pinkyl'] = [i for i in frame_contact if frame_contact[i] in pinkyl_indices]
+            contact_dict['palml'] = [i for i in frame_contact if frame_contact[i] in palml_indices]
+            # right
+            contact_dict['thumbr'] = [i for i in frame_contact if frame_contact[i] in thumbr_indices]
+            contact_dict['indexr'] = [i for i in frame_contact if frame_contact[i] in indexr_indices]
+            contact_dict['middler'] = [i for i in frame_contact if frame_contact[i] in middler_indices]
+            contact_dict['ringr'] = [i for i in frame_contact if frame_contact[i] in ringr_indices]
+            contact_dict['pinkyr'] = [i for i in frame_contact if frame_contact[i] in pinkyr_indices]
+            contact_dict['palmr'] = [i for i in frame_contact if frame_contact[i] in palmr_indices]
+
+            idx = 0
+            for _, v in contact_dict.items():
+                if len(v) > 0:
+                    contact_flow[frame][str(idx)] = [frame_verts_obj[i] for i in v]
+                    contact_flow[frame][str(idx)] = np.mean(contact_flow[frame][str(idx)], axis=0)
+                idx += 1
+            assert idx == 11
+            # o_mesh.export(os.path.join(obj_out_dir, f'{frame}.ply'))
             # left hand
             l_mesh = Mesh(vertices=verts_lhand[frame], faces=manol.faces, smooth=True)
-            l_mesh.export(os.path.join(lhand_out_dir, f'{frame}.ply'))
+            # l_mesh.export(os.path.join(lhand_out_dir, f'{frame}.ply'))
+
             # right hand
             r_mesh = Mesh(vertices=verts_rhand[frame], faces=manor.faces, smooth=True)
-            r_mesh.export(os.path.join(rhand_out_dir, f'{frame}.ply'))
+            # r_mesh.export(os.path.join(rhand_out_dir, f'{frame}.ply'))
 
             mv.set_static_meshes([o_mesh, l_mesh, r_mesh])
 
@@ -146,12 +261,15 @@ if __name__ == '__main__':
                         help='The path to the folder containing smplx models')
     parser.add_argument('--out-path', required=True, type=str,
                         help='The action sequence name')
+    parser.add_argument('--smplx-path', required=True, type=str,
+                        help='smplx to mano mapping')
 
     args = parser.parse_args()
 
     grab_path = args.grab_path
     model_path = args.model_path
     out_path = args.out_path
+    smplx_path = args.smplx_path
 
     # grab_path = 'PATH_TO_DOWNLOADED_GRAB_DATA/grab'
     # model_path = 'PATH_TO_DOWNLOADED_MODELS_FROM_SMPLX_WEBSITE/'
@@ -159,7 +277,8 @@ if __name__ == '__main__':
     cfg = {
         'grab_path': grab_path,
         'model_path': model_path,
-        'out_path': out_path
+        'out_path': out_path,
+        'smplx_path': smplx_path
     }
 
     cfg = Config(**cfg)
