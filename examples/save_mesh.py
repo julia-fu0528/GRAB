@@ -62,53 +62,10 @@ def visualize_sequences(cfg):
     mv.close_viewer()
 
 
-def seg(manol_mesh, manor_mesh):
-    sealed_faces = np.load("../data/sealed_faces.npy", allow_pickle=True).item()
-
-    right_hand_vertices = manor_mesh.vertices
-    left_hand_vertices = manol_mesh.vertices
-
-    right_faces = sealed_faces["sealed_faces_right"]
-    right_faces_color = sealed_faces["sealed_faces_color_right"]
-    left_faces = right_faces[:, [1, 0, 2]]
-    left_faces_color = right_faces_color
-
-    seg_dict = {}
-
-    for vertex_idx, vertex in enumerate(right_hand_vertices):
-        for i, (face, color) in enumerate(zip(right_faces, right_faces_color)):
-            if vertex_idx in face:
-                if str(color) not in seg_dict:
-                    seg_dict[str(color)] = [vertex_idx]
-                else:
-                    seg_dict[str(color)].append(vertex_idx)
-
-    return seg_dict
-    # for vertex_idx, vertex in enumerate(left_hand_vertices):
-    #     for i, (face, color) in enumerate(zip(left_faces, left_faces_color)):
-    #         if (vertex_idx - half_vertices) in face:
-    #             pass
-
 
 def vis_sequence(cfg,sequence, mv):
         seq_data = parse_npz(sequence)
         contact = seq_data['contact']
-        
-        # load smplx mano mapping
-        # with open(cfg.smplx_path, 'rb') as f:
-            # vertex_mappings = pickle.load(f)
-        # vertex_mappings = np.load(cfg.smplx_path, allow_pickle=True)
-        # print(f"vertex_mappings: {vertex_mappings.keys()}")
-        # sys.exit()
-        # manol_vertex_ids = vertex_mappings['left_hand']
-        # manor_vertex_ids = vertex_mappings['right_hand']
-        fingers_vertex_ids = {'test': range(237, 243),
-                                'thumb':[104, 105, 123, 124], 
-                                'index': range(43, 69), 
-                                'middle': range(69, 95), 
-                                'ring': range(95, 121), 
-                                'pinky': range(121, 147), 
-                                'palm': range(147, 778)}
 
         n_comps = seq_data['n_comps']
         gender = seq_data['gender']
@@ -163,50 +120,28 @@ def vis_sequence(cfg,sequence, mv):
         os.makedirs(obj_out_dir, exist_ok=True)
         os.makedirs(lhand_out_dir, exist_ok=True)
         os.makedirs(rhand_out_dir, exist_ok=True)
-
-        l_mesh = Mesh(vertices=verts_lhand[0], faces=manol.faces, smooth=True)
-        r_mesh = Mesh(vertices=verts_rhand[0], faces=manor.faces, smooth=True)
-        seg_dict = seg(l_mesh, r_mesh)
-
-        # thumb_indices = seg_dict['9'] + seg_dict['12']
-        # ring_indices = seg_dict['0'] + seg_dict['5'] + seg_dict['15']
-        # index_indices = seg_dict['1'] + seg_dict['10'] + seg_dict['11']
-        # middle_indices = seg_dict['3'] + seg_dict['4'] + seg_dict['14']
-        # pinky_indices = seg_dict['2'] + seg_dict['6'] + seg_dict['13']
-        # palm_indices = seg_dict['7'] + seg_dict['8']
-        # thumb: 9, 12; ring: 0, 5, 15; index: 1, 10, 11; middle: 3, 4, 14; pinky: 2, 6, 13; palm: 7, 8
-
+        # left
         thumbl_indices = [38, 39 , 40]
-        thumbr_indices = [53, 54, 55]
         indexl_indices = [26, 27, 28]
-        indexr_indices = [41, 42, 43]
         middlel_indices = [29, 30, 31]
-        middler_indices = [44, 45, 46]
         ringl_indices = [35, 36, 37]
-        ringr_indices = [50, 51, 52]
         pinkyl_indices = [32, 33, 34]
-        pinkyr_indices = [47, 48, 49]
         palml_indices = [21]
+        # right
+        thumbr_indices = [53, 54, 55]
+        indexr_indices = [41, 42, 43]
+        middler_indices = [44, 45, 46]
+        ringr_indices = [50, 51, 52]
+        pinkyr_indices = [47, 48, 49]
         palmr_indices = [22]
-
 
         contact_flow = []
         obj_contact = contact['object']
 
-        colors_map = np.array([
-            [0, 0, 127],
-            [0, 0, 232],
-            [0, 56, 255],
-            [0, 148, 255],
-            [12, 244, 234],
-            [86, 255, 160],
-            [160, 255, 86],
-            [234, 255, 12],
-            [255, 170, 0],
-            [255, 85, 0],
-            [232, 0, 0],
-            [127, 0, 0]
-        ])
+        colors_map = np.array([[0, 0, 127],[0, 0, 232],[0, 56, 255],[0, 148, 255],
+            [12, 244, 234],[86, 255, 160],[160, 255, 86],[234, 255, 12],
+            [255, 170, 0],[255, 85, 0],[232, 0, 0],[127, 0, 0]])
+            
         for frame in range(0,T):
             # object
             o_mesh = Mesh(vertices=verts_obj[frame], faces=obj_mesh.faces)
