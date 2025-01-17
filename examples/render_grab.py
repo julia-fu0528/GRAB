@@ -105,6 +105,7 @@ def vis_sequence(cfg,sequence, mv):
             t_mesh = Mesh(vertices=verts_table[frame], faces=table_mesh.faces, vc=colors['white'])
 
             mv.set_static_meshes([o_mesh, s_mesh, s_mesh_wf, t_mesh])
+            print(f"saving to {seq_render_path+'/%04d.png'%frame}")
             mv.save_snapshot(seq_render_path+'/%04d.png'%frame)
 
 
